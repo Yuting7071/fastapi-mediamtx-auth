@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <title>Retina 監控 - 登入</title>
+    <style>
+        body { margin: 0; background: #0d1117; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; }
+        .login-card { background: #161b22; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); width: 300px; display: flex; flex-direction: column; gap: 15px; }
+        h2 { text-align: center; color: #00d1b2; margin: 0 0 10px 0; }
+        input { padding: 12px; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 4px; }
+        button { padding: 12px; background: #238636; color: white; border: none; cursor: pointer; border-radius: 4px; font-weight: bold; }
+        button:hover { background: #2ea043; }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <h2>Retina Login</h2>
+        <input type="text" id="username" placeholder="帳號">
+        <input type="password" id="password" placeholder="密碼">
+        <button onclick="doLogin()">登入</button>
+    </div>
+
+    <script>
+        async function doLogin() {
+            const formData = new URLSearchParams({
+                username: document.getElementById('username').value,
+                password: document.getElementById('password').value
+            });
+
+            try {
+                const res = await fetch('/login', { method: 'POST', body: formData });
+                if (res.ok) {
+                    const data = await res.json();
+                    // 儲存 Token 到瀏覽器
+                    localStorage.setItem('access_token', data.access_token);
+                    // 跳轉到攝影機頁面
+                    window.location.href = '/my_camera.html';
+                } else {
+                    alert("帳號或密碼錯誤");
+                }
+            } catch (e) {
+                alert("連線後端失敗");
+            }
+        }
+    </script>
+</body>
+</html>

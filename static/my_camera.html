@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Retina 監控 - my_camera</title>
+    <style>
+        :root {
+            --primary-color: #00d1b2;
+            --bg-color: #0d1117;
+            --nav-bg: #161b22;
+            --danger-color: #da3633;
+        }
+
+        body { margin: 0; background: #000; color: white; font-family: -apple-system, system-ui, sans-serif; }
+        
+        /* 導覽列樣式 */
+        .nav { 
+            background: var(--nav-bg); 
+            padding: 10px 20px; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5); 
+        }
+        
+        .user-info { display: flex; align-items: center; gap: 10px; }
+        .live-dot { width: 8px; height: 8px; background: #ff4d4d; border-radius: 50%; display: inline-block; animation: blink 1s infinite; }
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+
+        .container { display: flex; flex-direction: column; align-items: center; padding: 20px; }
+
+        /* 影片播放器外層 */
+        .video-wrapper {
+            position: relative;
+            width: 100%;
+            max-width: 1000px;
+            aspect-ratio: 16 / 9; 
+            background: #111;
+            border-radius: 12px;
+            border: 1px solid #333;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        video { width: 100%; height: 100%; object-fit: contain; display: block; }
+
+        /* 載入中遮罩 */
+        .loading-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #111; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 5;
+            transition: opacity 0.5s ease;
+        }
+
+        .spinner {
+            width: 40px; height: 40px; border: 4px solid #222;
+            border-top: 4px solid var(--primary-color); border-radius: 50%;
+            animation: spin 1s linear infinite; margin-bottom: 15px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .btn-logout { 
+            background: var(--danger-color); color: white; border: none; 
+            padding: 6px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; 
+        }
+        .btn-logout:hover { background: #f85149; }
+        
+        #status { color: #8b949e; margin-top: 15px; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <div class="nav">
+        <div class="user-info">
+            <span class="live-dot"></span>
+            <span id="displayUser" style="color:var(--primary-color); font-weight:bold;">LIVE: 載入中...</span>
+        </div>
+        <button class="btn-logout" onclick="logout()">登出</button>
+    </div>
+
+    <div class="container">
+        <div class="video-wrapper">
+            <div id="loadingOverlay" class="loading-overlay">
+                <div class="spinner"></div>
+                <p id="loadingText">正在建立安全連線...</p>
+            </div>
+            
+            <video id="videoPlayer" controls autoplay playsinline muted></video>
+        </div>
+        
+        <p id="status">🔴 等待訊號中...</p>
+    </div>
+
+    <script>
+        // MediaMTX 的 WHEP 接口地址
+        const MTX_WHEP_URL = 'http://127.0.0.1:8889/my_camera/whep';
+
+        window.onload = async () => {
+            const token = localStorage.getItem('access_token');
+            
+            if (!token) {
+                window.location.href = '/index.html'; // 沒 Token 回首頁
+                return;
+            }
+
+            // 1. 同步使用者名稱 (串接你的 /userinfo 路由)
+            try {
+                const userRes = await fetch('/userinfo', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (userRes.ok) {
+                    const userData = await userRes.json();
+                    document.getElementById('displayUser').innerText = `LIVE: ${userData.username}`;
+                } else if (userRes.status === 401) {
+                    logout(); // Token 效期過了，強制登出
+                    return;
+                }
+            } catch (err) {
+                console.error("無法讀取使用者資訊");
+            }
+
+            // 2. 啟動 WebRTC 串流
+            startWebRTC(token);
+        };
+
+        async function startWebRTC(token) {
+            const statusEl = document.getElementById('status');
+            const overlay = document.getElementById('loadingOverlay');
+            const videoPlayer = document.getElementById('videoPlayer');
+            
+            // 建立 WebRTC 連線
+            const pc = new RTCPeerConnection({
+                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            });
+
+            // 設定只接收影音
+            pc.addTransceiver('video', { direction: 'recvonly' });
+            pc.addTransceiver('audio', { direction: 'recvonly' });
+
+            pc.ontrack = (e) => {
+                videoPlayer.srcObject = e.streams[0];
+                
+                // 當影片真正開始播放時隱藏讀取動畫
+                videoPlayer.onloadedmetadata = () => {
+                    overlay.style.opacity = '0';
+                    setTimeout(() => overlay.style.display = 'none', 500);
+                    statusEl.innerHTML = "🟢 <span style='color:white'>連線成功：即時監控中</span>";
+                };
+            };
+
+            // 建立 Offer 並發送給 MediaMTX
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+
+            try {
+                // 向 MediaMTX 要求串流，同時帶著 JWT Token 給後端驗證
+                const res = await fetch(MTX_WHEP_URL, {
+                    method: 'POST',
+                    body: pc.localDescription.sdp,
+                    headers: {
+                        'Content-Type': 'application/sdp',
+                        'Authorization': `Bearer ${token}` // 此處 Token 會被 MediaMTX 轉發到你的 /mediamtx/auth
+                    }
+                });
+
+                if (!res.ok) {
+                    if (res.status === 401) throw new Error("存取權限不足");
+                    throw new Error("媒體伺服器拒絕連線");
+                }
+
+                // 接收 Answer 並建立連線
+                const answer = await res.text();
+                await pc.setRemoteDescription({ type: 'answer', sdp: answer });
+
+            } catch (e) {
+                document.getElementById('loadingText').innerText = "連線失敗";
+                statusEl.innerText = "❌ " + e.message;
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem('access_token');
+            window.location.href = '/index.html';
+        }
+    </script>
+</body>
+</html>
