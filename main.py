@@ -33,23 +33,22 @@ fake_user_db = {
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
+def decode_access_token(token: str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        if username is None:
+            raise JWTError()
+        return username
+    except JWTError:
+        raise HTTPException(status_code=401)
+
 
 # 製作token
 def create_token(username: str):
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     data = {"sub": username, "exp": expire}
     return jwt.encode(data, SECRET_KEY, algorithm=ALGORITHM)
-
-# username
-def verify_token(token: str = Depends(oauth2_scheme)):
-    try:
-        payload= jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username = payload.get("sub")
-        if username is None:
-            raise  HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
-        return username
-    except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
 
 
 # 登入路由
@@ -61,20 +60,16 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     token = create_token(form_data.username)
     return {"access_token": token, "token_type": "bearer"}
 
+# get userinfo
+@app.get("/userinfo")
+async def get_userinfo(token: str = Depends(oauth2_scheme)):
+    return {"username": decode_access_token(token)}
 
 # 驗證mediaMtxtoken
 @app.post("/mediamtx/auth")
 async def mediamtx_verify(data: MediaMTXAuthRequest):
-    token = data.token
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return {"status": "ok"} # 成功：回傳 200
-    except:
-        raise HTTPException(status_code=401) # 失敗：回傳 401
+    decode_access_token(data.token)
+    return {"status":"ok"}
 
-# get username
-@app.get("/userinfo")
-async def get_userinfo(user: str = Depends(verify_token)):
-    return{"status":"ok", "username": user}
 
 app.mount("/", StaticFiles(directory="static", html=True))
