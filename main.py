@@ -5,9 +5,17 @@ from fastapi.staticfiles import StaticFiles
 from jose import JWTError,jwt
 import os
 from dotenv import load_dotenv
-
+from pydantic import BaseModel
 load_dotenv()
 
+class MediaMTXAuthRequest(BaseModel):
+    ip: str | None
+    user: str | None
+    password: str | None
+    token: str 
+    action: str
+    path: str
+    
 # JWT config
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
@@ -32,7 +40,7 @@ def create_token(username: str):
     data = {"sub": username, "exp": expire}
     return jwt.encode(data, SECRET_KEY, algorithm=ALGORITHM)
 
-# verify token
+# username
 def verify_token(token: str = Depends(oauth2_scheme)):
     try:
         payload= jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -53,20 +61,11 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     token = create_token(form_data.username)
     return {"access_token": token, "token_type": "bearer"}
 
-# 處理mediaMTXt傳來的Body
-#{
-#    "ip": "ip",
-#    "user": "user",
-#    "password": "password",
-#    "token": "token",
-#    "action": "action",
-#    "path": "path"
-#}
 
-# 驗證token
+# 驗證mediaMtxtoken
 @app.post("/mediamtx/auth")
-async def mediamtx_verify(data: dict):
-    token = data.get("token")
+async def mediamtx_verify(data: MediaMTXAuthRequest):
+    token = data.token
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return {"status": "ok"} # 成功：回傳 200
